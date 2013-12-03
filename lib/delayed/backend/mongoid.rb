@@ -48,9 +48,13 @@ module Delayed
           criteria = criteria.lte(:priority => Worker.max_priority.to_i) if Worker.max_priority
           criteria = criteria.any_in(:queue => Worker.queues) if Worker.queues.any?
 
-          criteria.desc(:locked_by).asc(:priority).asc(:run_at).find_and_modify(
-            {"$set" => {:locked_at => right_now, :locked_by => worker.name}}, :new => true
-          )
+          job = criteria.desc(:locked_by).asc(:priority).asc(:run_at).first
+          if job
+            query  = { :_id => job.id, "$or" => [{ locked_by: worker.name }, { locked_at: nil }, { locked_at: { '$lt' => (right_now - max_run_time) }}] }
+            setter = { "$set" => { locked_at: right_now, locked_by: worker.name }}
+            output = collection.find(query).update(setter)
+            job.reload.locked_by == worker.name ? job : nil
+          end
         end
 
         # When a worker is exiting, make sure we don't have any locked jobs.
